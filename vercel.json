@@ -1,21 +1,3 @@
 {
-  "functions": {
-    "api/chat.js": {
-      "memory": 128,
-      "maxDuration": 15
-    }
-  }
+  "version": 2
 }
-```
-
-4. **"Commit changes"**
-
----
-
-Tu repo ahora debe tener estos archivos:
-```
-mi-chatbot/
-├── api/
-│   └── chat.js
-├── vercel.json
-└── README.md
