@@ -22,16 +22,17 @@ export default async function handler(req, res) {
   if (email) {
     console.log("Email detectado:", email);
 
-    const hubspotRes = await fetch(`https://api.hubapi.com/contacts/v1/contact?hapikey=${process.env.HUBSPOT_API_KEY}`, {
+    const hubspotRes = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
       },
       body: JSON.stringify({
-        properties: [
-          { property: "email", value: email },
-          { property: "hs_lead_status", value: "NEW" }
-        ]
+        properties: {
+          email: email,
+          hs_lead_status: "NEW"
+        }
       })
     });
 
