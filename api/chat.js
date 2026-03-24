@@ -7,7 +7,6 @@ export default async function handler(req, res) {
 
   const { messages } = req.body;
 
-  // Buscar email en los mensajes del usuario
   const allUserText = messages
     .filter(m => m.role === "user")
     .map(m => m.content)
@@ -16,75 +15,31 @@ export default async function handler(req, res) {
   const emailMatch = allUserText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   const email = emailMatch ? emailMatch[0] : null;
 
-  // Armar resumen de la conversación
   const conversationText = messages
     .map(m => `${m.role === "user" ? "Usuario" : "Bot"}: ${m.content}`)
     .join("\n");
 
-  // Si encontró un email, crear contacto en HubSpot con la conversación
   if (email) {
-    try {
-      // 1. Crear o actualizar contacto
-      const contactRes = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
-        },
-        body: JSON.stringify({
-          properties: {
-            email: email,
-            hs_lead_status: "NEW"
-          }
-        })
-      });
+    console.log("Email detectado:", email);
 
-      const contactData = await contactRes.json();
-      const contactId = contactData.id;
+    const hubspotRes = await fetch("https://api.hubapi.com/contacts/v1/contact", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
+      },
+      body: JSON.stringify({
+        properties: [
+          { property: "email", value: email },
+          { property: "hs_lead_status", value: "NEW" }
+        ]
+      })
+    });
 
-      // 2. Agregar la conversación como nota en el contacto
-      if (contactId) {
-        const noteRes = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
-          },
-          body: JSON.stringify({
-            properties: {
-              hs_note_body: `Conversación del chatbot:\n\n${conversationText}`,
-              hs_timestamp: Date.now()
-            }
-          })
-        });
-
-        const noteData = await noteRes.json();
-        const noteId = noteData.id;
-
-        // 3. Asociar la nota al contacto
-        if (noteId) {
-          await fetch(`https://api.hubapi.com/crm/v3/associations/notes/contacts/batch/create`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
-            },
-            body: JSON.stringify({
-              inputs: [{
-                from: { id: noteId },
-                to: { id: contactId },
-                type: "note_to_contact"
-              }]
-            })
-          });
-        }
-      }
-    } catch (e) {
-      // Si falla HubSpot no interrumpe el chat
-    }
+    const hubspotData = await hubspotRes.json();
+    console.log("HubSpot response:", JSON.stringify(hubspotData));
   }
 
-  // Prompt actualizado para pedir email al final
   const systemPrompt = `${process.env.SYSTEM_PROMPT}
 
 Al final de cada conversación, cuando el usuario haya hecho su consulta principal, preguntale amablemente: "¿Te gustaría que te contactáramos? Si es así, dejame tu email y nos comunicamos a la brevedad."`;
@@ -98,10 +53,7 @@ Al final de cada conversación, cuando el usuario haya hecho su consulta princip
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
+        { role: "system", content: systemPrompt },
         ...messages
       ],
       max_tokens: 500
