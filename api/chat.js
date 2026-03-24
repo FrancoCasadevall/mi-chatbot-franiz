@@ -23,7 +23,6 @@ export default async function handler(req, res) {
     console.log("Email detectado:", email);
 
     try {
-      // 1. Crear contacto
       const hubspotRes = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
         method: "POST",
         headers: {
@@ -42,7 +41,6 @@ export default async function handler(req, res) {
       console.log("HubSpot contacto:", JSON.stringify(hubspotData));
       const contactId = hubspotData.id;
 
-      // 2. Crear nota con la conversación
       if (contactId) {
         const noteRes = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
           method: "POST",
@@ -62,7 +60,6 @@ export default async function handler(req, res) {
         console.log("HubSpot nota:", JSON.stringify(noteData));
         const noteId = noteData.id;
 
-        // 3. Asociar nota al contacto
         if (noteId) {
           await fetch("https://api.hubapi.com/crm/v3/associations/notes/contacts/batch/create", {
             method: "POST",
@@ -78,7 +75,6 @@ export default async function handler(req, res) {
               }]
             })
           });
-          console.log("Nota asociada al contacto");
         }
       }
     } catch (e) {
@@ -109,4 +105,3 @@ Al final de cada conversación, cuando el usuario haya hecho su consulta princip
   const data = await response.json();
   res.status(200).json({ reply: data.choices[0].message.content });
 }
-
