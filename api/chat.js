@@ -5,24 +5,17 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { messages } = req.body;
-
-  const allUserText = messages
-    .filter(m => m.role === "user")
-    .map(m => m.content)
-    .join(" ");
-
-  const emailMatch = allUserText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-  const email = emailMatch ? emailMatch[0] : null;
+  const { messages, leadInfo } = req.body;
+  // leadInfo = { name, email } enviado desde el frontend al inicio de la conversación
 
   const conversationText = messages
     .map(m => `${m.role === "user" ? "Usuario" : "Bot"}: ${m.content}`)
     .join("\n");
 
-  if (email) {
-    console.log("Email detectado:", email);
-
+  // ── HubSpot: crear/actualizar contacto y guardar conversación ──────────────
+  if (leadInfo?.email) {
     try {
+      // 1. Crear contacto (si ya existe, HubSpot devuelve 409 — lo ignoramos)
       const hubspotRes = await fetch("https://api.hubapi.com/crm/v3/objects/contacts", {
         method: "POST",
         headers: {
@@ -31,16 +24,41 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           properties: {
-            email: email,
+            email: leadInfo.email,
+            firstname: leadInfo.name || "",
             hs_lead_status: "NEW"
           }
         })
       });
 
-      const hubspotData = await hubspotRes.json();
-      console.log("HubSpot contacto:", JSON.stringify(hubspotData));
-      const contactId = hubspotData.id;
+      let contactId = null;
 
+      if (hubspotRes.status === 409) {
+        // Contacto duplicado: buscarlo por email
+        const searchRes = await fetch(
+          `https://api.hubapi.com/crm/v3/objects/contacts/search`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${process.env.HUBSPOT_API_KEY}`
+            },
+            body: JSON.stringify({
+              filterGroups: [{
+                filters: [{ propertyName: "email", operator: "EQ", value: leadInfo.email }]
+              }]
+            })
+          }
+        );
+        const searchData = await searchRes.json();
+        contactId = searchData.results?.[0]?.id || null;
+      } else {
+        const hubspotData = await hubspotRes.json();
+        contactId = hubspotData.id || null;
+        console.log("HubSpot contacto creado:", contactId);
+      }
+
+      // 2. Guardar conversación como nota asociada al contacto
       if (contactId) {
         const noteRes = await fetch("https://api.hubapi.com/crm/v3/objects/notes", {
           method: "POST",
@@ -50,14 +68,12 @@ export default async function handler(req, res) {
           },
           body: JSON.stringify({
             properties: {
-              hs_note_body: `Conversación del chatbot:\n\n${conversationText}`,
+              hs_note_body: `📋 Conversación del chatbot:\n\n${conversationText}`,
               hs_timestamp: Date.now().toString()
             }
           })
         });
-
         const noteData = await noteRes.json();
-        console.log("HubSpot nota:", JSON.stringify(noteData));
         const noteId = noteData.id;
 
         if (noteId) {
@@ -75,6 +91,7 @@ export default async function handler(req, res) {
               }]
             })
           });
+          console.log("Nota guardada y asociada al contacto:", contactId);
         }
       }
     } catch (e) {
@@ -82,9 +99,11 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── OpenAI ─────────────────────────────────────────────────────────────────
   const systemPrompt = `${process.env.SYSTEM_PROMPT}
 
-Al final de cada conversación, cuando el usuario haya hecho su consulta principal, preguntale amablemente: "¿Te gustaría que te contactáramos? Si es así, dejame tu email y nos comunicamos a la brevedad."`;
+El usuario que está hablando se llama ${leadInfo?.name || "visitante"}.
+Usá su nombre ocasionalmente para personalizar la conversación, pero sin exagerar.`;
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
